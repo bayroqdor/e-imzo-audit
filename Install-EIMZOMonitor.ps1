@@ -1,11 +1,11 @@
-# =====================================================================
-# E-IMZO Monitoring tizimini to'liq avtomatik o'rnatish skripti (V3 - Fix Spaces)
-# =====================================================================
+# ===============================================================
+# E-IMZO Monitoring tizimini to'liq avtomatik o'rnatish skripti 
+# ===============================================================
 
 $botToken = "SIZNING_BOT_TOKENINGIZ"
 $chatId = "SIZNING_CHAT_ID"
 
-# Siz belgilagan papkalar:
+# Asosiy papkalar
 $installDir = "C:\Program Files\DSservice"
 $targetDir = "C:\DSKEYS"
 $serviceName = "EIMZOMonitor"
@@ -21,17 +21,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "3. E-IMZO papkasiga kuzatuv qoidasi (SACL) o'rnatilmoqda..." -ForegroundColor Cyan
+# "Все/Everyone" tizim kodi (SID) orqali beriladi
 $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
-$auditUser = $sid.Translate([System.Security.Principal.NTAccount]).Value
-
 $acl = Get-Acl $targetDir
 $auditRules = "ReadAndExecute, Modify, Delete"
 $inherit = "ContainerInherit, ObjectInherit"
 $propagate = "None"
 $auditType = "Success"
-$rule = New-Object System.Security.AccessControl.FileSystemAuditRule($auditUser, $auditRules, $inherit, $propagate, $auditType)
-$acl.SetAuditRule($rule)
-$acl | Set-Acl $targetDir
+$rule = New-Object System.Security.AccessControl.FileSystemAuditRule($sid, $auditRules, $inherit, $propagate, $auditType)
+$acl.AddAuditRule($rule)
+Set-Acl -Path $targetDir -AclObject $acl
 
 Write-Host "4. Asosiy monitoring skripti yaratilmoqda..." -ForegroundColor Cyan
 $scriptContent = @"
@@ -48,7 +47,7 @@ function Write-Log {
     "`$time - `$Message" | Out-File -FilePath `$logFile -Append -Encoding UTF8
 }
 
-Write-Log "=== E-IMZO Monitoring ishga tushdi (Anti-Spam) ==="
+Write-Log "=== E-IMZO Monitoring ishga tushdi (Jangovar holat) ==="
 `$lastCheck = Get-Date
 
 while (`$true) {
@@ -60,6 +59,7 @@ while (`$true) {
     }
     foreach (`$key in `$keysToRemove) { `$eventCache.Remove(`$key) }
 
+    # Xatolar ko'rsatilmaydi, jimgina keyingi siklga o'tadi
     `$events = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4663; StartTime=`$lastCheck; EndTime=`$now} -ErrorAction SilentlyContinue
 
     if (`$events) {
@@ -72,7 +72,7 @@ while (`$true) {
             `$subjectUserName = (`$eventData | Where-Object { `$_.Name -eq 'SubjectUserName' }).'#text'
 
             if (`$objectName -match "\.pfx`$" -and `$objectName -match `$targetFolderName -and `$subjectUserName -notmatch "\`$`$") {
-                `$actionType = if (`$processName -match "explorer.exe") { "Nusxalash yoki Korish" } else { "Dastur orqali murojaat" }
+                `$actionType = if (`$processName -match "explorer.exe") { "Nusxalash yoki Korish" } else { "Dastur orqali" }
                 `$fileNameOnly = Split-Path `$objectName -Leaf
                 `$eventHash = "`$subjectUserName|`$fileNameOnly|`$actionType"
                 
@@ -92,7 +92,9 @@ while (`$true) {
 
                     try {
                         Invoke-RestMethod -Uri `$telegramUrl -Method Post -ContentType "application/json; charset=utf-8" -Body `$payload -ErrorAction Stop | Out-Null
-                    } catch {}
+                    } catch {
+                        Write-Log "TELEGRAM XATOSI: `$(`$_.Exception.Message)"
+                    }
                 }
             }
         }
@@ -105,28 +107,29 @@ $scriptContent | Out-File -FilePath "$installDir\DSAUDIT.ps1" -Encoding UTF8
 
 Write-Host "5. NSSM xizmati tayyorlanmoqda..." -ForegroundColor Cyan
 
-# Eski xizmat bo'lsa o'chirish (Start-Process orqali xavfsiz o'chirish)
+# Eski xizmatni to'xtatish va tozalash
 if (Get-Service $serviceName -ErrorAction SilentlyContinue) {
     Stop-Service $serviceName -Force
     Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "remove $serviceName confirm" -Wait -WindowStyle Hidden
     Start-Sleep -Seconds 2
 }
 
-# nssm.exe ni nusxalash
+# NSSM nusxasini olish
 if (-not (Test-Path "$installDir\nssm.exe")) {
-    if (Test-Path "C:\DS\nssm.exe") {
-        Copy-Item "C:\DS\nssm.exe" -Destination "$installDir\nssm.exe" -Force
+    if (Test-Path "C:\nssm.exe") {
+        Copy-Item "C:\nssm.exe" -Destination "$installDir\nssm.exe" -Force
     } else {
-        Write-Warning "Diqqat: C:\DS\nssm.exe topilmadi!"
+        Write-Warning "XATOLIK: C:\nssm.exe fayli topilmadi! Iltimos uni joyiga qaytaring."
         exit
     }
 }
 
-Write-Host "6. Windows Service (NSSM) yaratilmoqda va ishga tushirilmoqda..." -ForegroundColor Cyan
+Write-Host "6. Windows Service (NSSM) o'rnatilmoqda va ishga tushirilmoqda..." -ForegroundColor Cyan
 $psPath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-$psArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$installDir\DSAUDIT.ps1`""
 
-# Probeli bor yo'llar uchun PowerShell Start-Process orqali NSSM ni ishga tushirish:
+# Probelli papkalar uchun maxsus moslashtirilgan argument (faqat fayl nomi)
+$psArgs = "-ExecutionPolicy Bypass -NoProfile -File `"DSAUDIT.ps1`""
+
 Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "install $serviceName `"$psPath`" $psArgs" -Wait -WindowStyle Hidden
 Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "set $serviceName AppDirectory `"$installDir`"" -Wait -WindowStyle Hidden
 Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "start $serviceName" -Wait -WindowStyle Hidden
