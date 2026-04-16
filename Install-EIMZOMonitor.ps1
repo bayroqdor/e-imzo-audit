@@ -1,27 +1,26 @@
 # =====================================================================
-# E-IMZO Monitoring tizimini to'liq avtomatik o'rnatish skripti (V2 - Rus/Universal)
+# E-IMZO Monitoring tizimini to'liq avtomatik o'rnatish skripti (V3 - Fix Spaces)
 # =====================================================================
 
 $botToken = "SIZNING_BOT_TOKENINGIZ"
 $chatId = "SIZNING_CHAT_ID"
 
-$installDir = "C:\DSAUDIT"
+# Siz belgilagan papkalar:
+$installDir = "C:\Program Files\DSservice"
 $targetDir = "C:\DSKEYS"
 $serviceName = "EIMZOMonitor"
 
 Write-Host "1. Papkalar tayyorlanmoqda..." -ForegroundColor Cyan
-if (-not (Test-Path $installDir)) { New-Item -Path $installDir -ItemType Directory | Out-Null }
-if (-not (Test-Path $targetDir)) { New-Item -Path $targetDir -ItemType Directory | Out-Null }
+if (-not (Test-Path $installDir)) { New-Item -Path $installDir -ItemType Directory -Force | Out-Null }
+if (-not (Test-Path $targetDir)) { New-Item -Path $targetDir -ItemType Directory -Force | Out-Null }
 
 Write-Host "2. Windows File System Auditi yoqilmoqda (auditpol)..." -ForegroundColor Cyan
-# Ruscha va Inglizcha tizimlar uchun universal urinish
 & auditpol /set /subcategory:"Файловая система" /success:enable /failure:enable *>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     & auditpol /set /subcategory:"File System" /success:enable /failure:enable *>&1 | Out-Null
 }
 
 Write-Host "3. E-IMZO papkasiga kuzatuv qoidasi (SACL) o'rnatilmoqda..." -ForegroundColor Cyan
-# "Everyone" sozini tilga qaramasdan universal kod (SID) orqali chaqiramiz
 $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
 $auditUser = $sid.Translate([System.Security.Principal.NTAccount]).Value
 
@@ -106,21 +105,19 @@ $scriptContent | Out-File -FilePath "$installDir\DSAUDIT.ps1" -Encoding UTF8
 
 Write-Host "5. NSSM xizmati tayyorlanmoqda..." -ForegroundColor Cyan
 
-# Eski xizmat bo'lsa o'chirish
+# Eski xizmat bo'lsa o'chirish (Start-Process orqali xavfsiz o'chirish)
 if (Get-Service $serviceName -ErrorAction SilentlyContinue) {
     Stop-Service $serviceName -Force
-    cmd.exe /c "$installDir\nssm.exe remove $serviceName confirm" *>&1 | Out-Null
+    Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "remove $serviceName confirm" -Wait -WindowStyle Hidden
     Start-Sleep -Seconds 2
 }
 
-# nssm.exe ni qidirish yoki nusxalash
+# nssm.exe ni nusxalash
 if (-not (Test-Path "$installDir\nssm.exe")) {
     if (Test-Path "C:\DS\nssm.exe") {
-        Write-Host "  -> C:\DS dagi eski NSSM fayli olindi." -ForegroundColor Yellow
         Copy-Item "C:\DS\nssm.exe" -Destination "$installDir\nssm.exe" -Force
     } else {
-        Write-Warning "Diqqat: NSSM.exe topilmadi va server ishlamayapti!"
-        Write-Warning "Iltimos nssm.exe faylini $installDir papkasiga tashlab, bu skriptni qayta ishlating."
+        Write-Warning "Diqqat: C:\DS\nssm.exe topilmadi!"
         exit
     }
 }
@@ -129,11 +126,13 @@ Write-Host "6. Windows Service (NSSM) yaratilmoqda va ishga tushirilmoqda..." -F
 $psPath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 $psArgs = "-ExecutionPolicy Bypass -NoProfile -File `"$installDir\DSAUDIT.ps1`""
 
-cmd.exe /c "$installDir\nssm.exe install $serviceName `"$psPath`" $psArgs" *>&1 | Out-Null
-cmd.exe /c "$installDir\nssm.exe set $serviceName AppDirectory `"$installDir`"" *>&1 | Out-Null
-cmd.exe /c "$installDir\nssm.exe start $serviceName" *>&1 | Out-Null
+# Probeli bor yo'llar uchun PowerShell Start-Process orqali NSSM ni ishga tushirish:
+Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "install $serviceName `"$psPath`" $psArgs" -Wait -WindowStyle Hidden
+Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "set $serviceName AppDirectory `"$installDir`"" -Wait -WindowStyle Hidden
+Start-Process -FilePath "$installDir\nssm.exe" -ArgumentList "start $serviceName" -Wait -WindowStyle Hidden
 
 Write-Host "=====================================================" -ForegroundColor Green
 Write-Host "MUVAFFAQIYATLI YAKUNLANDI!" -ForegroundColor Green
+Write-Host "Xizmat nomi: $serviceName" -ForegroundColor Green
 Write-Host "Loglar manzili: $installDir\DSAUDIT_log.txt" -ForegroundColor Yellow
 Write-Host "=====================================================" -ForegroundColor Green
